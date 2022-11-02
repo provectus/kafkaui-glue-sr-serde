@@ -11,8 +11,8 @@ services:
       - zookeeper0
       - kafka0
     environment:
-      AWS_ACCESS_KEY_ID: 'AKIA3WJZWGAYDYAMDEHA'
-      AWS_SECRET_ACCESS_KEY: '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'
+      AWS_ACCESS_KEY_ID: '{ AWS_ACCESS_KEY_ID }'
+      AWS_SECRET_ACCESS_KEY: '{ AWS_SECRET_ACCESS_KEY }'
 
       kafka.clusters.0.name: MyFavoriteCluster
       kafka.clusters.0.bootstrapServers: kafka0:29092
