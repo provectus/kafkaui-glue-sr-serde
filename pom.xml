@@ -15,6 +15,22 @@
     <test.containers.version>1.17.5</test.containers.version>
   </properties>
 
+  <repositories>
+    <repository>
+      <id>confluent</id>
+      <url>https://packages.confluent.io/maven/</url>
+    </repository>
+    <repository>
+      <id>central</id>
+      <name>Central Repository</name>
+      <url>https://repo.maven.apache.org/maven2</url>
+      <layout>default</layout>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
   <dependencies>
     <dependency>
       <groupId>software.amazon.glue</groupId>
@@ -34,6 +50,12 @@
       <version>3.17.3</version>
     </dependency>
 
+    <dependency>
+      <groupId>io.confluent</groupId>
+      <artifactId>kafka-protobuf-provider</artifactId>
+      <version>7.0.1</version>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>com.provectus</groupId>
       <artifactId>kafka-ui-serde-api</artifactId>
