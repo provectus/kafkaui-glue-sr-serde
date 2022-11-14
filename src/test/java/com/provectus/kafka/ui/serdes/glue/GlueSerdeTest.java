@@ -67,11 +67,6 @@ import software.amazon.awssdk.services.glue.model.RegistryId;
 
 class GlueSerdeTest {
 
-  static {
-    System.setProperty(SdkSystemSetting.AWS_ACCESS_KEY_ID.property(), "AKIA3WJZWGAYNFSULKOD");
-    System.setProperty(SdkSystemSetting.AWS_SECRET_ACCESS_KEY.property(), "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");
-  }
-
   private static final Logger log = LoggerFactory.getLogger(GlueSerdeTest.class);
 
   private static final String REGION = System.getProperty(
