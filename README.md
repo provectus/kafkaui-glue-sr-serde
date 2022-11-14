@@ -4,7 +4,6 @@ This is pluggable serde implementation for [kafka-ui](https://github.com/provect
 
 You can read about Glue Schema [registry](https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html) and how it can be applied for [Kafka usage](https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html).
 
-Currently, this serde only supports Deserialization and can be used for view messages in [kafka-ui](https://github.com/provectus/kafka-ui/).
 
 For properties description and configuration example please see [docker-compose file](docker-compose/setup-example.yaml).
 
