@@ -1,12 +1,14 @@
 package com.provectus.kafka.ui.serdes.glue;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static software.amazon.awssdk.services.glue.model.DataFormat.*;
 
+import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryKafkaDeserializer;
 import com.amazonaws.services.schemaregistry.serializers.GlueSchemaRegistryKafkaSerializer;
 import com.amazonaws.services.schemaregistry.serializers.json.JsonDataWithSchema;
 import com.amazonaws.services.schemaregistry.utils.AWSSchemaRegistryConstants;
-import com.amazonaws.services.schemaregistry.utils.apicurio.DynamicSchema;
-import com.amazonaws.services.schemaregistry.utils.apicurio.MessageDefinition;
+import com.amazonaws.services.schemaregistry.utils.AvroRecordType;
+import com.amazonaws.services.schemaregistry.utils.ProtobufMessageType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.google.common.base.Preconditions;
@@ -14,8 +16,10 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.provectus.kafka.ui.serde.api.DeserializeResult;
 import com.provectus.kafka.ui.serde.api.Serde;
+import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -31,10 +35,13 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.BytesDeserializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -121,6 +128,29 @@ class GlueSerdeTest {
     return new KafkaProducer<>(props);
   }
 
+  private KafkaProducer<String, byte[]> createRawProducer() {
+    Properties props = new Properties();
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+    return new KafkaProducer<>(props);
+  }
+
+  private <T> KafkaConsumer<String, T> createConsumer(DataFormat dataFormat) {
+    Properties props = new Properties();
+    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+    props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, GlueSchemaRegistryKafkaDeserializer.class.getName());
+    props.put(ConsumerConfig.GROUP_ID_CONFIG, "testGroup" + randomInt());
+    props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    props.put(AWSSchemaRegistryConstants.AWS_REGION, REGION);
+    props.put(AWSSchemaRegistryConstants.REGISTRY_NAME, REGISTRY_NAME);
+    props.put(AWSSchemaRegistryConstants.DATA_FORMAT, dataFormat.name());
+    props.put(AWSSchemaRegistryConstants.AVRO_RECORD_TYPE, AvroRecordType.GENERIC_RECORD.getName());
+    props.put(AWSSchemaRegistryConstants.PROTOBUF_MESSAGE_TYPE, ProtobufMessageType.DYNAMIC_MESSAGE.getName());
+    return new KafkaConsumer<>(props);
+  }
+
   private KafkaConsumer<Bytes, Bytes> createRawConsumer() {
     Properties props = new Properties();
     props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
@@ -132,7 +162,8 @@ class GlueSerdeTest {
     return new KafkaConsumer<>(props);
   }
 
-  private <T> void fullCycleDeserializationCheck(
+  // Checks if Serde.Deserializer compatible with GlueSchemaRegistryKafkaSerializer
+  private <T> void checkDeserializerIsCompatibleWithKafkaLibrarySerializer(
                                 DataFormat dataFormat,
                                 List<T> valuesToProduce,
                                 List<String> expectedDeserializedValues) throws Exception {
@@ -172,8 +203,54 @@ class GlueSerdeTest {
     }
   }
 
+  // Checks if Serde.Serializer compatible with GlueSchemaRegistryKafkaDeserializer
+  private <T> void checkSerializerIsCompatibleWithKafkaLibraryDeserializer(
+      DataFormat dataFormat,
+      String schemaDefinition,
+      List<String> jsonValuesToProduce,
+      List<T> expectedDeserializedValues,
+      Comparator<T> comparator) throws Exception {
+    String topic = "test-" + dataFormat.name().toLowerCase() + "-" + System.currentTimeMillis();
+    registerSchema(topic, dataFormat, schemaDefinition);
+    try (GlueSerde serde = new GlueSerde();
+         var producer = createRawProducer()) {
+      serde.configure(
+          DefaultCredentialsProvider.create(),
+          REGION,
+          null,
+          REGISTRY_NAME,
+          null,
+          "%s",
+          List.of(),
+          List.of()
+      );
+      assertTrue(serde.canSerialize(topic, Serde.Target.VALUE));
+
+      var serializer = serde.serializer(topic, Serde.Target.VALUE);
+      for (int i = 0; i < expectedDeserializedValues.size(); i++) {
+        String k = String.valueOf(i);
+        byte[] val = serializer.serialize(jsonValuesToProduce.get(i));
+        producer.send(new ProducerRecord<>(topic, 0, k, val)).get();
+      }
+
+      List<T> polled = new ArrayList<>();
+      try (KafkaConsumer<String, T> consumer = createConsumer(dataFormat)) {
+        consumer.subscribe(List.of(topic));
+        for (int i = 0; i < 5 && polled.size() != expectedDeserializedValues.size(); i++) {
+          for (var rec : consumer.poll(Duration.ofSeconds(1))) {
+            polled.add(rec.value());
+          }
+        }
+      }
+      Assertions.assertEquals(expectedDeserializedValues.size(), polled.size());
+      for (int i = 0; i < expectedDeserializedValues.size(); i++) {
+        Assertions.assertEquals(0, comparator.compare(expectedDeserializedValues.get(i), polled.get(i)));
+      }
+    }
+  }
+
   @Test
-  void avroSchemaDeserialize() throws Exception {
+  void testAvroFormatSerdeCompatibility() throws Exception {
     var schema =  new Schema.Parser().parse(
         "{"
             + "  \"type\": \"record\","
@@ -201,25 +278,32 @@ class GlueSerdeTest {
         .set("field2", randomInt())
         .build();
 
-    fullCycleDeserializationCheck(
-        DataFormat.AVRO,
+    checkDeserializerIsCompatibleWithKafkaLibrarySerializer(
+        AVRO,
         List.of(v1, v2),
         List.of(JsonUtil.avroRecordToJson(v1), JsonUtil.avroRecordToJson(v2))
+    );
+
+    checkSerializerIsCompatibleWithKafkaLibraryDeserializer(
+        AVRO,
+        schema.toString(),
+        List.of(JsonUtil.avroRecordToJson(v1), JsonUtil.avroRecordToJson(v2)),
+        List.of(v1, v2),
+        Comparator.naturalOrder()
     );
   }
 
   @Test
-  void protoSchemaDeserialize() throws Exception {
-    Descriptors.Descriptor descriptor = DynamicSchema.newBuilder()
-        .setSyntax("proto3")
-        .setPackage("com.provectus")
-        .addMessageDefinition(
-            MessageDefinition.newBuilder("TestProtoRecord")
-                .addField("field1", "string", "field1", 1, null)
-                .addField("field2", "int32", "field2", 2, null)
-                .build())
-        .build()
-        .getMessageDescriptor("TestProtoRecord");
+  void testProtoFormatSerdeCompatibility() throws Exception {
+    var schema = "syntax = \"proto3\";\n"
+        + "package com.provectus;\n"
+        + "\n"
+        + "message TestProtoRecord {\n"
+        + "  string field1 = 1;\n"
+        + "  int32 field2 = 2;\n"
+        + "}\n";
+
+    Descriptors.Descriptor descriptor = new ProtobufSchema(schema).toDescriptor();
 
     var v1 = DynamicMessage.newBuilder(descriptor)
         .setField(descriptor.findFieldByName("field1"), randomInt() + "")
@@ -231,15 +315,23 @@ class GlueSerdeTest {
         .setField(descriptor.findFieldByName("field2"), randomInt())
         .build();
 
-    fullCycleDeserializationCheck(
-        DataFormat.PROTOBUF,
+    checkDeserializerIsCompatibleWithKafkaLibrarySerializer(
+        PROTOBUF,
         List.of(v1, v2),
         List.of(JsonUtil.protoMsgToJson(v1), JsonUtil.protoMsgToJson(v2))
+    );
+
+    checkSerializerIsCompatibleWithKafkaLibraryDeserializer(
+        PROTOBUF,
+        schema,
+        List.of(JsonUtil.protoMsgToJson(v1), JsonUtil.protoMsgToJson(v2)),
+        List.of(v1, v2),
+        Comparator.comparing(DynamicMessage::toString)
     );
   }
 
   @Test
-  void jsonSchemaDeserialize() throws Exception {
+  void testJsonSchemaFormatSerdeCompatibility() throws Exception {
     String jsonSchema =  "{ "
         + "  \"$schema\": \"http://json-schema.org/draft-07/schema#\", "
         + "  \"$id\": \"http://example.com/myURI.schema.json\", "
@@ -266,10 +358,18 @@ class GlueSerdeTest {
         .put("f2", randomInt() + "")
         .toString();
 
-    fullCycleDeserializationCheck(
-        DataFormat.JSON,
+    checkDeserializerIsCompatibleWithKafkaLibrarySerializer(
+        JSON,
         List.of(JsonDataWithSchema.builder(jsonSchema, v1).build(), JsonDataWithSchema.builder(jsonSchema, v2).build()),
         List.of(v1, v2)
+    );
+
+    checkSerializerIsCompatibleWithKafkaLibraryDeserializer(
+        JSON,
+        jsonSchema,
+        List.of(v1, v2),
+        List.of(JsonDataWithSchema.builder(jsonSchema, v1).build(), JsonDataWithSchema.builder(jsonSchema, v2).build()),
+        Comparator.comparing(JsonDataWithSchema::getPayload)
     );
   }
 
@@ -299,6 +399,10 @@ class GlueSerdeTest {
           List.of(Map.entry(testValueSchema, Pattern.compile("topic3|topic4")))
       );
 
+      Consumer<String> schemaCreator = name -> registerSchema(name, AVRO, "{\"type\":\"string\"}");
+      schemaCreator.accept(testKeySchema);
+      schemaCreator.accept(testValueSchema);
+
       assertTrue(serde.canDeserialize("topic1", Serde.Target.KEY));
       assertTrue(serde.canDeserialize("topic2", Serde.Target.KEY));
       assertFalse(serde.canDeserialize("topic3", Serde.Target.KEY));
@@ -309,19 +413,22 @@ class GlueSerdeTest {
     }
   }
 
+  private void registerSchema(String name, DataFormat dataFormat, String schemaDef){
+    GLUE_CLIENT.createSchema(
+        CreateSchemaRequest.builder()
+            .registryId(RegistryId.builder().registryName(REGISTRY_NAME).build())
+            .schemaName(name)
+            .dataFormat(dataFormat.name().toUpperCase())
+            .compatibility(Compatibility.FULL)
+            .schemaDefinition(schemaDef)
+            .build()
+    );
+  }
+
   @Test
   void canDeserializeUsesTopicKVTemplateToFindSchemas() {
     String topicName = "testTopic-" + UUID.randomUUID();
-    Consumer<String> schemaCreator = name ->
-        GLUE_CLIENT.createSchema(
-            CreateSchemaRequest.builder()
-                .registryId(RegistryId.builder().registryName(REGISTRY_NAME).build())
-                .schemaName(name)
-                .dataFormat("AVRO")
-                .compatibility(Compatibility.FULL)
-                .schemaDefinition("{ \"type\": \"string\" }")
-                .build()
-        );
+    Consumer<String> schemaCreator = name -> registerSchema(name, AVRO, "{\"type\":\"string\"}");
     schemaCreator.accept(topicName + "-key");
     schemaCreator.accept(topicName + "-value");
 
