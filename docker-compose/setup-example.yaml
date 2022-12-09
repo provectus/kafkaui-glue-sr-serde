@@ -1,0 +1,59 @@
+---
+version: '2'
+services:
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8080:8080
+    depends_on:
+      - zookeeper0
+      - kafka0
+    environment:
+      AWS_ACCESS_KEY_ID: '{ AWS_ACCESS_KEY_ID }'
+      AWS_SECRET_ACCESS_KEY: '{ AWS_SECRET_ACCESS_KEY }'
+
+      kafka.clusters.0.name: MyFavoriteCluster
+      kafka.clusters.0.bootstrapServers: kafka0:29092
+
+      kafka.clusters.0.serde.0.name: GlueSchemaRegistry
+      kafka.clusters.0.serde.0.filePath: /glue-serde/kafkaui-glue-serde-1.0-SNAPSHOT-jar-with-dependencies.jar
+      kafka.clusters.0.serde.0.className: com.provectus.kafka.ui.serdes.glue.GlueSerde
+      kafka.clusters.0.serde.0.properties.region: us-east-1  #required
+      kafka.clusters.0.serde.0.properties.registry: kui-test #required, name of Glue Schema Registry
+      # template that will be used to find schema name for topic key. Optional, default is null (not set).
+      kafka.clusters.0.serde.0.properties.keySchemaNameTemplate: "%s-key"
+      # template that will be used to find schema name for topic value. Optional, default is  '%s'
+      kafka.clusters.0.serde.0.properties.valueSchemaNameTemplate: "%s-value"
+      # schema name -> topics pattern where it will be used for keys. Optional.
+      kafka.clusters.0.serde.0.properties.topicKeysSchemas.some-topic-key: "some-topic1|some-topic2"
+      # schema name -> topics pattern where it will be used for values. Optional.
+      kafka.clusters.0.serde.0.properties.topicValuesSchemas.some-topic-value: "some-topic1|some-topic2"
+      kafka.clusters.0.serde.0.properties.topicValuesSchemas.another-topic-val: "another-topic-value"
+
+    volumes:
+      - ./../target:/glue-serde
+
+  zookeeper0:
+    image: confluentinc/cp-zookeeper:7.2.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
+
+  kafka0:
+    image: confluentinc/cp-kafka:7.2.1
+    depends_on:
+      - zookeeper0
+    ports:
+      - 9092:9092
+      - 9997:9997
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper0:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka0:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
