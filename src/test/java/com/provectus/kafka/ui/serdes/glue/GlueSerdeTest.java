@@ -26,6 +26,7 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecordBuilder;
@@ -189,7 +190,8 @@ class GlueSerdeTest {
           null,
           "%s",
           List.of(),
-          List.of()
+          List.of(),
+          false
       );
       assertTrue(serde.canDeserialize(topic, Serde.Target.VALUE));
 
@@ -222,7 +224,8 @@ class GlueSerdeTest {
           null,
           "%s",
           List.of(),
-          List.of()
+          List.of(),
+          false
       );
       assertTrue(serde.canSerialize(topic, Serde.Target.VALUE));
 
@@ -396,7 +399,8 @@ class GlueSerdeTest {
           null,
           "%s",
           List.of(Map.entry(testKeySchema, Pattern.compile("topic1|topic2"))),
-          List.of(Map.entry(testValueSchema, Pattern.compile("topic3|topic4")))
+          List.of(Map.entry(testValueSchema, Pattern.compile("topic3|topic4"))),
+          false
       );
 
       Consumer<String> schemaCreator = name -> registerSchema(name, AVRO, "{\"type\":\"string\"}");
@@ -441,12 +445,42 @@ class GlueSerdeTest {
           "%s-key",
           "%s-value",
           List.of(),
-          List.of()
+          List.of(),
+          false
       );
       assertTrue(serde.canDeserialize(topicName, Serde.Target.KEY));
       assertTrue(serde.canDeserialize(topicName, Serde.Target.VALUE));
       assertFalse(serde.canDeserialize("some-other-topic", Serde.Target.KEY));
       assertFalse(serde.canDeserialize("some-other-topic", Serde.Target.VALUE));
+    }
+  }
+
+  @Test
+  void canSerializeReturnsTrueForAnyTopicIfSchemaExistenceCheckIsDisabled() {
+    Function<Boolean, GlueSerde> factory = checkEnabled -> {
+      GlueSerde serde = new GlueSerde();
+      serde.configure(
+          DefaultCredentialsProvider.create(),
+          REGION,
+          null,
+          REGISTRY_NAME,
+          "%s-key",
+          "%s-value",
+          List.of(),
+          List.of(),
+          checkEnabled
+      );
+      return serde;
+    };
+
+    try (GlueSerde serdeWithDisabledCheck = factory.apply(false)) {
+      assertTrue(serdeWithDisabledCheck.canSerialize("anyTopic", Serde.Target.KEY));
+      assertTrue(serdeWithDisabledCheck.canSerialize("anyTopic", Serde.Target.VALUE));
+    }
+
+    try (GlueSerde serdeWithEnabledCheck = factory.apply(true)) {
+      assertFalse(serdeWithEnabledCheck.canSerialize("anyTopic", Serde.Target.KEY));
+      assertFalse(serdeWithEnabledCheck.canSerialize("anyTopic", Serde.Target.VALUE));
     }
   }
 

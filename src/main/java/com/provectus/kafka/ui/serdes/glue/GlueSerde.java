@@ -66,6 +66,8 @@ public class GlueSerde implements Serde {
   private List<Map.Entry<String, Pattern>> topicKeysSchemas;
   private List<Map.Entry<String, Pattern>> topicValuesSchemas;
 
+  private boolean checkSchemaExistenceForDeserialize;
+
   @Override
   public void configure(PropertyResolver serdeProperties,
                         PropertyResolver clusterProperties,
@@ -92,7 +94,9 @@ public class GlueSerde implements Serde {
             .entrySet()
             .stream()
             .map(e -> Map.entry(e.getKey(), Pattern.compile(e.getValue())))
-            .collect(Collectors.toUnmodifiableList())
+            .collect(Collectors.toUnmodifiableList()),
+        serdeProperties.getProperty("checkSchemaExistenceForDeserialize", Boolean.class)
+            .orElse(false)
     );
   }
 
@@ -103,7 +107,9 @@ public class GlueSerde implements Serde {
                  @Nullable String keySchemaNameTemplate,
                  String valueSchemaNameTemplate,
                  List<Map.Entry<String, Pattern>> topicKeysSchemas,
-                 List<Map.Entry<String, Pattern>> topicValuesSchemas) {
+                 List<Map.Entry<String, Pattern>> topicValuesSchemas,
+                 boolean checkSchemaExistenceForDeserialize
+  ) {
     this.glueClient = GlueClient.builder()
         .region(Region.of(region))
         .endpointOverride(Optional.ofNullable(endpoint).map(URI::create).orElse(null))
@@ -121,6 +127,7 @@ public class GlueSerde implements Serde {
     this.valueSchemaNameTemplate = valueSchemaNameTemplate;
     this.topicKeysSchemas = topicKeysSchemas;
     this.topicValuesSchemas = topicValuesSchemas;
+    this.checkSchemaExistenceForDeserialize = checkSchemaExistenceForDeserialize;
   }
 
   private AwsCredentialsProvider createCredentialsProvider() {
@@ -149,7 +156,8 @@ public class GlueSerde implements Serde {
 
   @Override
   public boolean canSerialize(String topic, Target target) {
-    return getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
+    return !checkSchemaExistenceForDeserialize
+        || getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
   }
 
   @Override
