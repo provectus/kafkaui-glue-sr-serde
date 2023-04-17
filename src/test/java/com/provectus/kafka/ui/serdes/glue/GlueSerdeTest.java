@@ -456,7 +456,7 @@ class GlueSerdeTest {
   }
 
   @Test
-  void canSerializeReturnsTrueForAnyTopicIfSchemaExistenceCheckIsDisabled() {
+  void canDeserializeReturnsTrueForAnyTopicIfSchemaExistenceCheckIsDisabled() {
     Function<Boolean, GlueSerde> factory = checkEnabled -> {
       GlueSerde serde = new GlueSerde();
       serde.configure(
@@ -474,13 +474,13 @@ class GlueSerdeTest {
     };
 
     try (GlueSerde serdeWithDisabledCheck = factory.apply(false)) {
-      assertTrue(serdeWithDisabledCheck.canSerialize("anyTopic", Serde.Target.KEY));
-      assertTrue(serdeWithDisabledCheck.canSerialize("anyTopic", Serde.Target.VALUE));
+      assertTrue(serdeWithDisabledCheck.canDeserialize("anyTopic", Serde.Target.KEY));
+      assertTrue(serdeWithDisabledCheck.canDeserialize("anyTopic", Serde.Target.VALUE));
     }
 
     try (GlueSerde serdeWithEnabledCheck = factory.apply(true)) {
-      assertFalse(serdeWithEnabledCheck.canSerialize("anyTopic", Serde.Target.KEY));
-      assertFalse(serdeWithEnabledCheck.canSerialize("anyTopic", Serde.Target.VALUE));
+      assertFalse(serdeWithEnabledCheck.canDeserialize("anyTopic", Serde.Target.KEY));
+      assertFalse(serdeWithEnabledCheck.canDeserialize("anyTopic", Serde.Target.VALUE));
     }
   }
 
