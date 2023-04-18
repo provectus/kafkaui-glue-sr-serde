@@ -1,8 +1,11 @@
 package com.provectus.kafka.ui.serdes.glue;
 
 import com.amazonaws.services.schemaregistry.common.AWSDeserializerInput;
+import com.amazonaws.services.schemaregistry.common.GlueSchemaRegistryDataFormatDeserializer;
 import com.amazonaws.services.schemaregistry.common.configs.GlueSchemaRegistryConfiguration;
 import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryDeserializationFacade;
+import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryDeserializerDataParser;
+import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryDeserializerFactory;
 import com.amazonaws.services.schemaregistry.serializers.GlueSchemaRegistrySerializationFacade;
 import com.amazonaws.services.schemaregistry.serializers.json.JsonDataWithSchema;
 import com.amazonaws.services.schemaregistry.utils.AvroRecordType;
@@ -27,6 +30,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import lombok.NonNull;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -121,7 +125,7 @@ public class GlueSerde implements Serde {
         .httpClient(ApacheHttpClient.create())
         .build();
     GlueSchemaRegistryConfiguration sRegConfiguration = glueSrConfig(region, endpoint);
-    this.deserializationFacade = new GlueSchemaRegistryDeserializationFacade(sRegConfiguration, credentialsProvider);
+    this.deserializationFacade = createDeserializationFacade(sRegConfiguration, credentialsProvider);
     this.serializationFacade = GlueSchemaRegistrySerializationFacade.builder()
         .glueSchemaRegistryConfiguration(sRegConfiguration)
         .credentialProvider(credentialsProvider)
@@ -132,6 +136,14 @@ public class GlueSerde implements Serde {
     this.topicKeysSchemas = topicKeysSchemas;
     this.topicValuesSchemas = topicValuesSchemas;
     this.checkSchemaExistenceForDeserialize = checkSchemaExistenceForDeserialize;
+  }
+
+  private GlueSchemaRegistryDeserializationFacade createDeserializationFacade(
+      GlueSchemaRegistryConfiguration sRegConfiguration,
+      AwsCredentialsProvider credentialsProvider) {
+    var facade = new GlueSchemaRegistryDeserializationFacade(sRegConfiguration, credentialsProvider);
+    facade.setDeserializerFactory(new FixedDeserializerFactory());
+    return facade;
   }
 
   private AwsCredentialsProvider createCredentialsProvider() {
@@ -286,4 +298,36 @@ public class GlueSerde implements Serde {
     glueClient.close();
     deserializationFacade.close();
   }
+
+  private static class FixedDeserializerFactory extends GlueSchemaRegistryDeserializerFactory {
+
+    private static final FixedJsonDeserializer JSON_DESERIALIZER = new FixedJsonDeserializer();
+
+    @Override
+    public GlueSchemaRegistryDataFormatDeserializer getInstance(@NonNull DataFormat dataFormat,
+                                                                @NonNull GlueSchemaRegistryConfiguration configs) {
+      if (dataFormat == DataFormat.JSON) {
+        return JSON_DESERIALIZER;
+      } else {
+        return super.getInstance(dataFormat, configs);
+      }
+    }
+  }
+
+  // We need to override default JsonDeserializer because it tries to instantiate java object
+  // when schema has "className" field filled.
+  private static class FixedJsonDeserializer implements GlueSchemaRegistryDataFormatDeserializer {
+
+    private static final GlueSchemaRegistryDeserializerDataParser DESERIALIZER_DATA_PARSER =
+        GlueSchemaRegistryDeserializerDataParser.getInstance();
+
+    @Override
+    public Object deserialize(@NonNull ByteBuffer buffer,
+                              @NonNull com.amazonaws.services.schemaregistry.common.Schema schemaObject) {
+      String schema = schemaObject.getSchemaDefinition();
+      byte[] data = DESERIALIZER_DATA_PARSER.getPlainData(buffer);
+      return JsonDataWithSchema.builder(schema, new String(data)).build();
+    }
+  }
+
 }

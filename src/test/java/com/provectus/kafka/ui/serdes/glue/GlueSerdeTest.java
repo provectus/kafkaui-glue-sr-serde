@@ -386,7 +386,7 @@ class GlueSerdeTest {
   }
 
   @Test
-  void canDeserializeChecksTopicSchemaMappingMap() {
+  void canSerializeAndCanDeserializeCheckTopicSchemaMappingMap() {
     String testKeySchema = "testKeySchema-" + UUID.randomUUID();
     String testValueSchema = "testValSchema-" + UUID.randomUUID();
 
@@ -400,7 +400,7 @@ class GlueSerdeTest {
           "%s",
           List.of(Map.entry(testKeySchema, Pattern.compile("topic1|topic2"))),
           List.of(Map.entry(testValueSchema, Pattern.compile("topic3|topic4"))),
-          false
+          true
       );
 
       Consumer<String> schemaCreator = name -> registerSchema(name, AVRO, "{\"type\":\"string\"}");
@@ -414,6 +414,14 @@ class GlueSerdeTest {
       assertTrue(serde.canDeserialize("topic3", Serde.Target.VALUE));
       assertTrue(serde.canDeserialize("topic4", Serde.Target.VALUE));
       assertFalse(serde.canDeserialize("topic1", Serde.Target.VALUE));
+
+      assertTrue(serde.canSerialize("topic1", Serde.Target.KEY));
+      assertTrue(serde.canSerialize("topic2", Serde.Target.KEY));
+      assertFalse(serde.canSerialize("topic3", Serde.Target.KEY));
+
+      assertTrue(serde.canSerialize("topic3", Serde.Target.VALUE));
+      assertTrue(serde.canSerialize("topic4", Serde.Target.VALUE));
+      assertFalse(serde.canSerialize("topic1", Serde.Target.VALUE));
     }
   }
 
@@ -430,7 +438,7 @@ class GlueSerdeTest {
   }
 
   @Test
-  void canDeserializeUsesTopicKVTemplateToFindSchemas() {
+  void canSerializeAndCanDeserializeUsesTopicKVTemplateToFindSchemas() {
     String topicName = "testTopic-" + UUID.randomUUID();
     Consumer<String> schemaCreator = name -> registerSchema(name, AVRO, "{\"type\":\"string\"}");
     schemaCreator.accept(topicName + "-key");
@@ -446,12 +454,17 @@ class GlueSerdeTest {
           "%s-value",
           List.of(),
           List.of(),
-          false
+          true
       );
       assertTrue(serde.canDeserialize(topicName, Serde.Target.KEY));
       assertTrue(serde.canDeserialize(topicName, Serde.Target.VALUE));
       assertFalse(serde.canDeserialize("some-other-topic", Serde.Target.KEY));
       assertFalse(serde.canDeserialize("some-other-topic", Serde.Target.VALUE));
+
+      assertTrue(serde.canSerialize(topicName, Serde.Target.KEY));
+      assertTrue(serde.canSerialize(topicName, Serde.Target.VALUE));
+      assertFalse(serde.canSerialize("some-other-topic", Serde.Target.KEY));
+      assertFalse(serde.canSerialize("some-other-topic", Serde.Target.VALUE));
     }
   }
 
