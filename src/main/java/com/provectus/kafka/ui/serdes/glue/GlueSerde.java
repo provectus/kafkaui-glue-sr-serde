@@ -14,6 +14,7 @@ import com.google.protobuf.DynamicMessage;
 import com.provectus.kafka.ui.serde.api.DeserializeResult;
 import com.provectus.kafka.ui.serde.api.RecordHeaders;
 import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
+
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -25,6 +26,7 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
+
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -33,7 +35,9 @@ import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import com.provectus.kafka.ui.serde.api.PropertyResolver;
 import com.provectus.kafka.ui.serde.api.SchemaDescription;
 import com.provectus.kafka.ui.serde.api.Serde;
+
 import java.util.Optional;
+
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.glue.model.DataFormat;
@@ -156,8 +160,7 @@ public class GlueSerde implements Serde {
 
   @Override
   public boolean canSerialize(String topic, Target target) {
-    return !checkSchemaExistenceForDeserialize
-        || getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
+    return getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
   }
 
   @Override
@@ -171,7 +174,7 @@ public class GlueSerde implements Serde {
     String definition = schemaDefinition.schemaDefinition();
     // converts to format that is expected by serializationFacade
     Function<String, Object> inputConverter = str -> {
-      switch (dataFormat){
+      switch (dataFormat) {
         case AVRO:
           return JsonUtil.avroFromJson(str, new Schema.Parser().parse(definition));
         case PROTOBUF:
@@ -187,7 +190,8 @@ public class GlueSerde implements Serde {
 
   @Override
   public boolean canDeserialize(String topic, Target target) {
-    return getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
+    return !checkSchemaExistenceForDeserialize
+        || getSchemaName(topic, target).map(this::schemaExistsCached).orElse(false);
   }
 
   private Optional<String> findSchemaByPattern(List<Map.Entry<String, Pattern>> patterns, String topicName) {
