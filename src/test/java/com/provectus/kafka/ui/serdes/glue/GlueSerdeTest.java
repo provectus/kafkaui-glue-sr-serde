@@ -1,7 +1,13 @@
 package com.provectus.kafka.ui.serdes.glue;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static software.amazon.awssdk.services.glue.model.DataFormat.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static software.amazon.awssdk.services.glue.model.DataFormat.AVRO;
+import static software.amazon.awssdk.services.glue.model.DataFormat.JSON;
+import static software.amazon.awssdk.services.glue.model.DataFormat.PROTOBUF;
 
 import com.amazonaws.services.schemaregistry.deserializers.GlueSchemaRegistryKafkaDeserializer;
 import com.amazonaws.services.schemaregistry.serializers.GlueSchemaRegistryKafkaSerializer;
@@ -15,6 +21,7 @@ import com.google.common.base.Preconditions;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.provectus.kafka.ui.serde.api.DeserializeResult;
+import com.provectus.kafka.ui.serde.api.PropertyResolver;
 import com.provectus.kafka.ui.serde.api.Serde;
 import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
 import java.time.Duration;
@@ -22,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -97,7 +105,7 @@ class GlueSerdeTest {
   }
 
   static void checkCredsResolving() {
-    try (var provider = DefaultCredentialsProvider.create()){
+    try (var provider = DefaultCredentialsProvider.create()) {
       provider.resolveCredentials();
     } catch (Exception e) {
       throw new IllegalStateException("Error resolving AWS credentials", e);
@@ -165,9 +173,9 @@ class GlueSerdeTest {
 
   // Checks if Serde.Deserializer compatible with GlueSchemaRegistryKafkaSerializer
   private <T> void checkDeserializerIsCompatibleWithKafkaLibrarySerializer(
-                                DataFormat dataFormat,
-                                List<T> valuesToProduce,
-                                List<String> expectedDeserializedValues) throws Exception {
+      DataFormat dataFormat,
+      List<T> valuesToProduce,
+      List<String> expectedDeserializedValues) throws Exception {
     String topic = "test-" + dataFormat.name().toLowerCase() + "-" + System.currentTimeMillis();
     try (KafkaProducer<String, T> producer = createProducer(dataFormat)) {
       // schema will be registered with topic name (by default) during producing
@@ -254,7 +262,7 @@ class GlueSerdeTest {
 
   @Test
   void testAvroFormatSerdeCompatibility() throws Exception {
-    var schema =  new Schema.Parser().parse(
+    var schema = new Schema.Parser().parse(
         "{"
             + "  \"type\": \"record\","
             + "  \"name\": \"TestAvroRecord1\","
@@ -335,7 +343,7 @@ class GlueSerdeTest {
 
   @Test
   void testJsonSchemaFormatSerdeCompatibility() throws Exception {
-    String jsonSchema =  "{ "
+    String jsonSchema = "{ "
         + "  \"$schema\": \"http://json-schema.org/draft-07/schema#\", "
         + "  \"$id\": \"http://example.com/myURI.schema.json\", "
         + "  \"title\": \"TestRecord\","
@@ -425,7 +433,7 @@ class GlueSerdeTest {
     }
   }
 
-  private void registerSchema(String name, DataFormat dataFormat, String schemaDef){
+  private void registerSchema(String name, DataFormat dataFormat, String schemaDef) {
     GLUE_CLIENT.createSchema(
         CreateSchemaRequest.builder()
             .registryId(RegistryId.builder().registryName(REGISTRY_NAME).build())
@@ -495,6 +503,27 @@ class GlueSerdeTest {
       assertFalse(serdeWithEnabledCheck.canDeserialize("anyTopic", Serde.Target.KEY));
       assertFalse(serdeWithEnabledCheck.canDeserialize("anyTopic", Serde.Target.VALUE));
     }
+  }
+
+  @Test
+  void serdePropertiesUsedAsAwsCredsIfSet() {
+    var serdeProps = mock(PropertyResolver.class);
+    when(serdeProps.getProperty("awsAccessKeyId", String.class))
+        .thenReturn(Optional.of("awsAccessKeyId_test"));
+    when(serdeProps.getProperty("awsSecretAccessKey", String.class))
+        .thenReturn(Optional.of("awsSecretAccessKey_test"));
+
+    var createdProvider = GlueSerde.createCredentialsProvider(serdeProps);
+    var creds = createdProvider.resolveCredentials();
+    assertEquals("awsAccessKeyId_test", creds.accessKeyId());
+    assertEquals("awsSecretAccessKey_test", creds.secretAccessKey());
+  }
+
+  @Test
+  void defaultCredsProviderUsedIfNoCredsPropertiesSet() {
+    var serdeProps = mock(PropertyResolver.class);
+    var createdProvider = GlueSerde.createCredentialsProvider(serdeProps);
+    assertEquals(DefaultCredentialsProvider.create(), createdProvider);
   }
 
 }
