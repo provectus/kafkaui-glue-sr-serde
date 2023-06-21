@@ -10,6 +10,7 @@ import com.amazonaws.services.schemaregistry.serializers.GlueSchemaRegistrySeria
 import com.amazonaws.services.schemaregistry.serializers.json.JsonDataWithSchema;
 import com.amazonaws.services.schemaregistry.utils.AvroRecordType;
 import com.amazonaws.services.schemaregistry.utils.ProtobufMessageType;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
@@ -33,7 +34,9 @@ import javax.annotation.Nullable;
 import lombok.NonNull;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import com.provectus.kafka.ui.serde.api.PropertyResolver;
@@ -81,7 +84,7 @@ public class GlueSerde implements Serde {
                         PropertyResolver clusterProperties,
                         PropertyResolver appProperties) {
     configure(
-        createCredentialsProvider(),
+        createCredentialsProvider(serdeProperties),
         serdeProperties.getProperty("region", String.class)
             .orElseThrow(() -> new IllegalArgumentException("region not provided for GlueSerde")),
         serdeProperties.getProperty("endpoint", String.class).orElse(null),
@@ -146,8 +149,19 @@ public class GlueSerde implements Serde {
     return facade;
   }
 
-  private AwsCredentialsProvider createCredentialsProvider() {
-    // maybe provide tuning options in the future
+  @VisibleForTesting
+  static AwsCredentialsProvider createCredentialsProvider(PropertyResolver serdeProperties) {
+    Optional<String> awsAccessKey = serdeProperties.getProperty("awsAccessKeyId", String.class);
+    Optional<String> awsSecretKey = serdeProperties.getProperty("awsSecretAccessKey", String.class);
+    Optional<String> awsSessionToken = serdeProperties.getProperty("awsSessionToken", String.class);
+    if (awsAccessKey.isPresent() && awsSecretKey.isPresent()) {
+      if (awsSessionToken.isEmpty()) {
+        return () -> AwsBasicCredentials.create(awsAccessKey.get(), awsSecretKey.get());
+      }
+      return () -> AwsSessionCredentials.create(awsAccessKey.get(), awsSecretKey.get(), awsSessionToken.get());
+    }
+
+    // if creds properties weren't specified explicitly - using default creds provider
     return DefaultCredentialsProvider.create();
   }
 
