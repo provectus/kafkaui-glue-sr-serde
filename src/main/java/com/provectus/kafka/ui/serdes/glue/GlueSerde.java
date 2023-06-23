@@ -21,6 +21,7 @@ import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,10 +35,7 @@ import javax.annotation.Nullable;
 import lombok.NonNull;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
-import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.*;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import com.provectus.kafka.ui.serde.api.PropertyResolver;
 import com.provectus.kafka.ui.serde.api.SchemaDescription;
@@ -45,6 +43,8 @@ import com.provectus.kafka.ui.serde.api.Serde;
 
 import java.util.Optional;
 
+import software.amazon.awssdk.profiles.ProfileFile;
+import software.amazon.awssdk.profiles.ProfileFileSystemSetting;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.glue.model.DataFormat;
@@ -159,6 +159,22 @@ public class GlueSerde implements Serde {
         return () -> AwsBasicCredentials.create(awsAccessKey.get(), awsSecretKey.get());
       }
       return () -> AwsSessionCredentials.create(awsAccessKey.get(), awsSecretKey.get(), awsSessionToken.get());
+    }
+
+    Optional<String> profileName = serdeProperties.getProperty("awsProfileName", String.class);
+    Optional<String> profileFile = serdeProperties.getProperty("awsProfileFile", String.class);
+    if (profileName.isPresent() || profileFile.isPresent()) {
+      ProfileFile file = profileFile.map(filePath ->
+              ProfileFile.builder()
+                  .type(ProfileFile.Type.CREDENTIALS)
+                  .content(Path.of(filePath))
+                  .build()
+          )
+          .orElse(ProfileFile.defaultProfileFile());
+      return ProfileCredentialsProvider.builder()
+          .profileName(profileName.orElse(ProfileFileSystemSetting.AWS_PROFILE.defaultValue()))
+          .profileFile(file)
+          .build();
     }
 
     // if creds properties weren't specified explicitly - using default creds provider
